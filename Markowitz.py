@@ -11,6 +11,9 @@ import argparse
 import warnings
 import sys
 
+
+import pickle
+
 """
 Project Setup
 """
@@ -62,12 +65,20 @@ class EqualWeightPortfolio:
         """
         TODO: Complete Task 1 Below
         """
+        # print(f"assets: {assets}")
+        # print(f"df.columns: {df.columns}")
+        # print(f"df: {df}")
+        # print(f"portfolio_weights: {self.portfolio_weights}")
+        for date in df.index  :
+            for asset in assets :
+                self.portfolio_weights.loc[date, asset] = 1 / len(assets)
 
         """
         TODO: Complete Task 1 Above
         """
         self.portfolio_weights.ffill(inplace=True)
         self.portfolio_weights.fillna(0, inplace=True)
+        # print(f"portfolio_weights: {self.portfolio_weights}")
 
     def calculate_portfolio_returns(self):
         # Ensure weights are calculated
@@ -113,15 +124,40 @@ class RiskParityPortfolio:
         """
         TODO: Complete Task 2 Below
         """
-
-
-
+        # print(f"df_returns: {df_returns}")
+        # print(f"self.portfolio_weights: {self.portfolio_weights}")
+        day=0
+        check=False
+        for date in  df.index :
+            if day<=self.lookback :
+                current_weights = np.zeros(len(assets))
+            else :
+                if check==False :
+                    print(f"date :{date}")
+                    check=True
+                current_data=df_returns.iloc[day-self.lookback:day][assets]
+                current_sigma = current_data.std(axis=0)
+                # To prevent the first day's sigma is all zero
+                current_sigma_inverse = np.ones(len(assets))/current_sigma
+                current_weights = current_sigma_inverse/np.sum(current_sigma_inverse)
+            
+            for idx, asset in enumerate(assets) :
+                self.portfolio_weights.loc[date, asset] = current_weights[idx]
+            day += 1
         """
         TODO: Complete Task 2 Above
         """
-
+        # print(f"portfolio_weights: {self.portfolio_weights}")
         self.portfolio_weights.ffill(inplace=True)
         self.portfolio_weights.fillna(0, inplace=True)
+        
+        # with pd.option_context('display.max_rows', None, 
+        #                'display.max_columns', None,
+        #                'display.width', None,
+        #                'display.max_colwidth', None):
+        #     with open('my_rp_answer.txt', 'w') as f:
+        #         f.write(str(self.portfolio_weights))
+        # print(f"portfolio_weights: {self.portfolio_weights}")
 
     def calculate_portfolio_returns(self):
         # Ensure weights are calculated
@@ -180,7 +216,9 @@ class MeanVariancePortfolio:
         n = len(R_n.columns)
 
         with gp.Env(empty=True) as env:
+            # Quiet mode
             env.setParam("OutputFlag", 0)
+            # DualReductions set to 0 to avoid infeasible or unbounded model
             env.setParam("DualReductions", 0)
             env.start()
             with gp.Model(env=env, name="portfolio") as model:
@@ -190,8 +228,13 @@ class MeanVariancePortfolio:
 
                 # Sample Code: Initialize Decision w and the Objective
                 # NOTE: You can modify the following code
+                # n is the size of the w, and ub=1 means the sum of w is less than or equal to 1
                 w = model.addMVar(n, name="w", ub=1)
-                model.setObjective(w.sum(), gp.GRB.MAXIMIZE)
+                objective=w@mu-gamma/2*(w@Sigma@w)
+                model.setObjective(objective, gp.GRB.MAXIMIZE)
+                
+                model.addConstr(w.sum()==1, name="total-weight")
+                model.addConstr(w>=0, name="long-only")
 
                 """
                 TODO: Complete Task 3 Above
@@ -280,3 +323,14 @@ if __name__ == "__main__":
     
     # All grading logic is protected in grader.py
     judge.run_grading(args)
+    
+    # with open('Answer/rp.pkl', 'rb') as f:
+    #     data = pickle.load(f)
+        
+    # with pd.option_context('display.max_rows', None, 
+    #                    'display.max_columns', None,
+    #                    'display.width', None,
+    #                    'display.max_colwidth', None):
+    #     with open('rp_answer.txt', 'w') as f:
+    #         f.write(str(data))
+

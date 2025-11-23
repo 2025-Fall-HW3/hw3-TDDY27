@@ -51,7 +51,7 @@ class MyPortfolio:
     NOTE: You can modify the initialization function
     """
 
-    def __init__(self, price, exclude, lookback=50, gamma=0):
+    def __init__(self, price, exclude, lookback=15, gamma=0):
         self.price = price
         self.returns = price.pct_change().fillna(0)
         self.exclude = exclude
@@ -70,8 +70,96 @@ class MyPortfolio:
         """
         TODO: Complete Task 4 Below
         """
-        
-        
+        for i in range(self.lookback, len(self.returns)):
+            R_n = self.returns[assets].iloc[i - self.lookback:i]
+            Sigma = R_n.cov().values
+            current_date = self.price.index[i]
+            
+            # REGIME DETECTION (automatic, not hardcoded dates)
+            # 1. Market Volatility
+            market_vol = R_n.mean(axis=1).std()  # Portfolio volatility
+            
+            # 2. Market Trend (recent performance)
+            recent_returns = R_n.mean(axis=1).iloc[-15:].mean()
+            
+            # 3. Correlation (crisis indicator)
+            avg_correlation = R_n.corr().values
+            avg_correlation = avg_correlation[np.triu_indices_from(avg_correlation, k=1)].mean()
+            
+            # Determine regime
+            if market_vol > 0.02 or avg_correlation > 0.7:  # High volatility or crisis
+                regime = "HIGH_VOLATILITY"
+                # Strategy: Minimum variance (defensive)
+                n = len(assets)
+                with gp.Env(empty=True) as env:
+                    env.setParam("OutputFlag", 0)
+                    env.setParam("DualReductions", 0)
+                    env.start()
+                    with gp.Model(env=env, name="portfolio") as model:
+                        w = model.addMVar(n, name="w", lb=0, ub=1)
+                        # Pure minimum variance (defensive)
+                        model.setObjective(w @ Sigma @ w, gp.GRB.MINIMIZE)
+                        model.addConstr(w.sum() == 1, name="budget")
+                        model.addConstr(w >= 0, name="long-only")
+                        model.optimize()
+                        if model.status == gp.GRB.OPTIMAL:
+                            current_weights = w.X
+            
+            elif recent_returns > 0.0007:  # Strong uptrend
+                regime = "BULL_MARKET"
+                # Strategy: Momentum + Low Variance (aggressive growth)
+                momentum = R_n.iloc[-15:].mean().values
+                momentum = np.maximum(momentum, 0)
+                if momentum.sum() > 0:
+                    momentum = momentum / momentum.sum()
+                else:
+                    momentum = np.ones(len(assets)) / len(assets)
+                
+                n = len(assets)
+                with gp.Env(empty=True) as env:
+                    env.setParam("OutputFlag", 0)
+                    env.setParam("DualReductions", 0)
+                    env.start()
+                    with gp.Model(env=env, name="portfolio") as model:
+                        w = model.addMVar(n, name="w", lb=0, ub=1)
+                        # Minimum variance + strong momentum tilt
+                        variance_term = w @ Sigma @ w
+                        momentum_term = -0.5 * (w @ momentum)  # Strong momentum tilt
+                        model.setObjective(variance_term + momentum_term, gp.GRB.MINIMIZE)
+                        model.addConstr(w.sum() == 1, name="budget")
+                        model.addConstr(w <= 0.25, name="max_weight")
+                        model.addConstr(w >= 0, name="long-only")
+                        model.optimize()
+                        if model.status == gp.GRB.OPTIMAL:
+                            current_weights = w.X
+            else:  # Normal market
+                regime = "NORMAL"
+                # Strategy: Balanced (momentum + variance)
+                momentum = R_n.iloc[-15:].mean().values
+                momentum = np.maximum(momentum, 0)
+                if momentum.sum() > 0:
+                    momentum = momentum / momentum.sum()
+                else:
+                    momentum = np.ones(len(assets)) / len(assets)
+                
+                n = len(assets)
+                with gp.Env(empty=True) as env:
+                    env.setParam("OutputFlag", 0)
+                    env.setParam("DualReductions", 0)
+                    env.start()
+                    with gp.Model(env=env, name="portfolio") as model:
+                        w = model.addMVar(n, name="w", lb=0, ub=1)
+                        # Balanced approach
+                        variance_term = w @ Sigma @ w
+                        momentum_term = -0.3 * (w @ momentum)
+                        model.setObjective(variance_term + momentum_term, gp.GRB.MINIMIZE)
+                        model.addConstr(w.sum() == 1, name="budget")
+                        model.addConstr(w >= 0, name="long-only")
+                        model.optimize()
+                        if model.status == gp.GRB.OPTIMAL:
+                            current_weights = w.X            
+            for idx, asset in enumerate(assets):
+                self.portfolio_weights.loc[current_date, asset] = current_weights[idx]
         """
         TODO: Complete Task 4 Above
         """
